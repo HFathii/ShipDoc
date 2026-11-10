@@ -1,0 +1,178 @@
+﻿document.addEventListener('DOMContentLoaded', () => {
+    loadCertificates();
+    setupEventListeners();
+});
+
+const modal = document.getElementById('certModal');
+const openModalBtn = document.getElementById('openModalBtn');
+const closeModalBtn = document.getElementById('closeModalBtn');
+const cancelModalBtn = document.getElementById('cancelModalBtn');
+const certForm = document.getElementById('certForm');
+const certList = document.getElementById('certList');
+const searchInput = document.getElementById('searchInput');
+const filterSelect = document.getElementById('filterSelect');
+
+function setupEventListeners() {
+    openModalBtn.addEventListener('click', () => openModal());
+    closeModalBtn.addEventListener('click', () => closeModal());
+    cancelModalBtn.addEventListener('click', () => closeModal());
+    
+    window.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+
+    certForm.addEventListener('submit', handleFormSubmit);
+    searchInput.addEventListener('input', renderCertificates);
+    filterSelect.addEventListener('change', renderCertificates);
+}
+
+function openModal(cert = null) {
+    document.getElementById('certId').value = cert ? cert.id : '';
+    document.getElementById('certName').value = cert ? cert.name : '';
+    document.getElementById('certNumber').value = cert ? cert.number : '';
+    document.getElementById('issueDate').value = cert ? (cert.issueDate || '') : '';
+    document.getElementById('expiryDate').value = cert ? cert.expiry : '';
+    modal.style.display = 'flex';
+}
+
+function closeModal() {
+    modal.style.display = 'none';
+    certForm.reset();
+}
+
+function getCertificates() {
+    let certs = localStorage.getItem('maritime_certs_v2');
+    if (!certs) {
+        const defaultCerts = [
+            { id: 1, name: 'STCW Basic Safety Training', number: 'IR-99823', issueDate: '2023-01-15', expiry: '2028-01-15' },
+            { id: 2, name: 'Medical First Aid', number: 'IR-44512', issueDate: '2022-05-10', expiry: '2027-05-10' }
+        ];
+        localStorage.setItem('maritime_certs_v2', JSON.stringify(defaultCerts));
+        return defaultCerts;
+    }
+    return JSON.parse(certs);
+}
+
+function handleFormSubmit(e) {
+    e.preventDefault();
+    const id = document.getElementById('certId').value;
+    const name = document.getElementById('certName').value;
+    const number = document.getElementById('certNumber').value;
+    const issueDate = document.getElementById('issueDate').value;
+    const expiry = document.getElementById('expiryDate').value;
+
+    let certs = getCertificates();
+
+    if (id) {
+        certs = certs.map(c => c.id == id ? { id: Number(id), name, number, issueDate, expiry } : c);
+    } else {
+        const newCert = {
+            id: Date.now(),
+            name,
+            number,
+            issueDate,
+            expiry
+        };
+        certs.push(newCert);
+    }
+
+    localStorage.setItem('maritime_certs_v2', JSON.stringify(certs));
+    closeModal();
+    renderCertificates();
+}
+
+function deleteCertificate(id) {
+    if (confirm('آیا از حذف این مدرک اطمینان دارید؟')) {
+        let certs = getCertificates();
+        certs = certs.filter(c => c.id !== id);
+        localStorage.setItem('maritime_certs_v2', JSON.stringify(certs));
+        renderCertificates();
+    }
+}
+
+function editCertificate(id) {
+    let certs = getCertificates();
+    const cert = certs.find(c => c.id === id);
+    if (cert) openModal(cert);
+}
+
+function checkStatus(expiryDateStr) {
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const expiry = new Date(expiryDateStr);
+    expiry.setHours(0,0,0,0);
+
+    const diffTime = expiry - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) {
+        return { status: 'expired', label: 'منقضی شده', class: 'badge-expired', cardClass: 'status-expired' };
+    } else if (diffDays <= 30) {
+        return { status: 'warning', label: `انقضا در ${diffDays} روز`, class: 'badge-warning', cardClass: 'status-warning' };
+    } else {
+        return { status: 'valid', label: 'معتبر', class: 'badge-valid', cardClass: '' };
+    }
+}
+
+function renderCertificates() {
+    const certs = getCertificates();
+    const searchText = searchInput.value.toLowerCase();
+    const filterValue = filterSelect.value;
+
+    certList.innerHTML = '';
+
+    let total = certs.length;
+    let warningCount = 0;
+    let expiredCount = 0;
+
+    const filteredCerts = certs.filter(cert => {
+        const matchesSearch = cert.name.toLowerCase().includes(searchText) || cert.number.toLowerCase().includes(searchText);
+        const statusInfo = checkStatus(cert.expiry);
+
+        if (statusInfo.status === 'warning') warningCount++;
+        if (statusInfo.status === 'expired') expiredCount++;
+
+        let matchesFilter = true;
+        if (filterValue === 'valid') matchesFilter = (statusInfo.status === 'valid');
+        if (filterValue === 'warning') matchesFilter = (statusInfo.status === 'warning');
+        if (filterValue === 'expired') matchesFilter = (statusInfo.status === 'expired');
+
+        return matchesSearch && matchesFilter;
+    });
+
+    document.getElementById('totalCerts').textContent = total;
+    document.getElementById('warningCerts').textContent = warningCount;
+    document.getElementById('expiredCerts').textContent = expiredCount;
+
+    if (filteredCerts.length === 0) {
+        certList.innerHTML = '<p style="grid-column: 1 / -1; text-align: center; color: #64748b; padding: 30px;">هیچ مدرکی یافت نشد.</p>';
+        return;
+    }
+
+    filteredCerts.forEach(cert => {
+        const statusInfo = checkStatus(cert.expiry);
+        const card = document.createElement('div');
+        card.className = `cert-card ${statusInfo.cardClass}`;
+
+        card.innerHTML = `
+            <div>
+                <div class="cert-header-info">
+                    <span class="cert-title">${cert.name}</span>
+                    <span class="badge ${statusInfo.class}">${statusInfo.label}</span>
+                </div>
+                <div class="cert-body">
+                    <p><i class="fa-solid fa-id-card"></i> شماره مدرک: ${cert.number}</p>
+                    ${cert.issueDate ? `<p><i class="fa-solid fa-calendar-plus"></i> تاریخ صدور: ${cert.issueDate}</p>` : ''}
+                    <p><i class="fa-solid fa-calendar-xmark"></i> تاریخ انقضا: ${cert.expiry}</p>
+                </div>
+            </div>
+            <div class="cert-footer">
+                <button class="icon-btn edit-btn" onclick="editCertificate(${cert.id})" title="ویرایش"><i class="fa-solid fa-pen-to-square"></i> ویرایش</button>
+                <button class="icon-btn delete-btn" onclick="deleteCertificate(${cert.id})" title="حذف"><i class="fa-solid fa-trash"></i> حذف</button>
+            </div>
+        `;
+
+        certList.appendChild(card);
+    });
+}
+
